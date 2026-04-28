@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Avalia Proposta — Análise Inteligente com IA</title>
+  <style>
+    :root {
+      --primary:       #2563eb;
+      --primary-dark:  #1d4ed8;
+      --success:       #16a34a;
+      --warning:       #b45309;
+      --danger:        #dc2626;
+      --bg:            #f1f5f9;
+      --card:          #ffffff;
+      --text:          #1e293b;
+      --muted:         #64748b;
+      --border:        #e2e8f0;
+      --radius:        14px;
+      --shadow:        0 4px 16px rgba(0,0,0,.08);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+      color: #fff;
+      padding: 2rem 1.5rem 1.75rem;
+      text-align: center;
+    }
+    header h1 { font-size: 1.9rem; font-weight: 800; letter-spacing: -.5px; }
+    header p  { opacity: .8; margin-top: .4rem; font-size: .95rem; }
+
+    /* ── Layout ── */
+    main { max-width: 860px; margin: 2rem auto; padding: 0 1.25rem 4rem; }
+
+    /* ── Aviso de configuração ── */
+    #config-notice {
+      background: #fef9c3; border: 1px solid #fde047;
+      border-radius: 10px; padding: .85rem 1.1rem;
+      font-size: .88rem; margin-bottom: 1.5rem; display: none;
+    }
+    #config-notice code {
+      background: rgba(0,0,0,.07); padding: .1rem .35rem;
+      border-radius: 4px; font-family: monospace;
+    }
+
+    /* ── Card base ── */
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      margin-bottom: 1.5rem;
+    }
+    .card-head {
+      padding: 1.1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: #f8fafc;
+      font-weight: 700;
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .card-body { padding: 1.5rem; }
+
+    /* ── Formulário ── */
+    textarea {
+      width: 100%; min-height: 180px;
+      padding: .9rem 1rem;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: .95rem;
+      resize: vertical;
+      transition: border-color .2s, box-shadow .2s;
+      color: var(--text);
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+    }
+    .form-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: .9rem;
+    }
+    .char-count { font-size: .82rem; color: var(--muted); }
+
+    /* ── Botões ── */
+    .btn {
+      padding: .75rem 2rem;
+      border: none; border-radius: 9px;
+      font-size: .97rem; font-weight: 700;
+      cursor: pointer;
+      transition: all .18s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(37,99,235,.35);
+    }
+    .btn-primary:disabled { opacity: .55; cursor: not-allowed; transform: none !important; }
+
+    /* ── Loading ── */
+    #loading {
+      display: none; text-align: center;
+      padding: 3rem 1.5rem;
+    }
+    .spinner {
+      width: 52px; height: 52px;
+      border: 5px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+      margin: 0 auto 1.1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading .status-msg { font-size: .95rem; color: var(--muted); }
+    #loading .status-msg strong { color: var(--text); }
+
+    /* ── Resultado ── */
+    #resultado { display: none; }
+
+    .veredito-banner {
+      padding: 1.1rem 1.5rem;
+      border-radius: 10px;
+      font-size: 1.3rem;
+      font-weight: 800;
+      text-align: center;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
+    }
+    .v-aceitar  { background: #dcfce7; color: #15803d; border: 2px solid #86efac; }
+    .v-negociar { background: #fef3c7; color: #b45309; border: 2px solid #fcd34d; }
+    .v-recusar  { background: #fee2e2; color: #b91c1c; border: 2px solid #fca5a5; }
+
+    .resultado-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 600px) {
+      .resultado-grid { grid-template-columns: 1fr; }
+    }
+
+    .r-section {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+    }
+    .r-section.full { grid-column: 1 / -1; }
+    .r-section h3 {
+      font-size: .78rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: .65rem;
+    }
+    .r-section p  { font-size: .93rem; color: var(--text); }
+    .r-section ul { list-style: none; padding: 0; }
+    .r-section ul li {
+      font-size: .9rem;
+      color: var(--text);
+      padding: .28rem 0 .28rem 1.2rem;
+      position: relative;
+    }
+    .r-section ul li::before {
+      content: '▸';
+      position: absolute; left: 0;
+      color: var(--primary);
+      font-size: .8rem;
+    }
+    .r-section.positivos ul li::before { color: var(--success); }
+    .r-section.atencao  ul li::before { color: var(--warning); }
+    .r-section.riscos   ul li::before { color: var(--danger);  }
+    .r-section.negociar ul li::before { content: '💡'; font-size: .82rem; }
+
+    .preco-label {
+      display: inline-block;
+      padding: .25rem .8rem;
+      border-radius: 9999px;
+      font-weight: 700;
+      font-size: .82rem;
+      margin-bottom: .5rem;
+      text-transform: uppercase;
+    }
+    .p-caro    { background: #fee2e2; color: var(--danger);  }
+    .p-justo   { background: #dcfce7; color: var(--success); }
+    .p-barato  { background: #dbeafe; color: var(--primary); }
+
+    /* ── Erro ── */
+    .error-box {
+      background: #fee2e2; border: 1px solid #fca5a5;
+      border-radius: 10px; padding: 1rem 1.25rem;
+      color: var(--danger); font-size: .93rem;
+    }
+
+    /* ── Nova análise ── */
+    #btn-nova { display: none; margin-top: 1.5rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ Avalia Proposta</h1>
+  <p>Cole uma proposta comercial e receba uma análise detalhada com IA em segundos.</p>
+</header>
+
+<main>
+
+  <!-- Aviso quando API_URL não foi configurado -->
+  <div id="config-notice">
+    ⚠ <strong>API não configurada.</strong>
+    Rode <code>./infrastructure/init.sh</code> e atualize
+    <code>API_BASE_URL</code> no topo do script deste arquivo com a URL exibida.
+  </div>
+
+  <!-- Card de entrada -->
+  <div class="card" id="card-input">
+    <div class="card-head">📋 Cole a proposta comercial aqui</div>
+    <div class="card-body">
+      <textarea id="proposta"
+        placeholder="Cole aqui o texto completo da proposta comercial que deseja analisar...&#10;&#10;Exemplo: Proposta de fornecimento de 50 licenças de software ERP por R$ 120.000/ano, com suporte 8x5, treinamento inicial de 16h e SLA de 4 horas para incidentes críticos..."
+        oninput="atualizarContador()"></textarea>
+      <div class="form-footer">
+        <span class="char-count" id="char-count">0 caracteres</span>
+        <button class="btn btn-primary" id="btn-analisar" onclick="analisarProposta()">
+          Analisar Proposta
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Estado de loading -->
+  <div class="card" id="loading">
+    <div class="card-body">
+      <div class="spinner"></div>
+      <p class="status-msg">
+        <strong id="loading-titulo">Analisando sua proposta...</strong><br/>
+        <span id="loading-detalhe">Consultando o especialista em negociações B2B.</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- Resultado da análise -->
+  <div id="resultado">
+    <div id="veredito-banner" class="veredito-banner"></div>
+
+    <div class="card">
+      <div class="card-head">📊 Análise Completa</div>
+      <div class="card-body">
+        <div class="resultado-grid" id="resultado-grid"></div>
+      </div>
+    </div>
+
+    <div style="text-align:center">
+      <button class="btn btn-primary" id="btn-nova" onclick="novaAnalise()">
+        + Nova Análise
+      </button>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // ═══════════════════════════════════════════════════════════════════
+  // CONFIGURAÇÃO — atualize com a URL exibida pelo init.sh
+  // Exemplo local: 'http://localhost:4566/abc123def456'
+  // Exemplo AWS:   'https://abc123.execute-api.us-east-1.amazonaws.com'
+  // ═══════════════════════════════════════════════════════════════════
+  const API_BASE_URL = '__API_URL_PLACEHOLDER__';
+
+  // Polling: intervalo (ms) e máximo de tentativas
+  const POLL_INTERVAL = 2500;
+  const POLL_MAX      = 80;   // ~3,3 min máximo de espera
+
+  let pollTimer = null;
+  let pollCount = 0;
+
+  // ─── Inicialização ───────────────────────────────────────────────
+  window.addEventListener('DOMContentLoaded', () => {
+    if (API_BASE_URL === '__API_URL_PLACEHOLDER__' || !API_BASE_URL.startsWith('http')) {
+      document.getElementById('config-notice').style.display = 'block';
+    }
+  });
+
+  // ─── Contador de caracteres ──────────────────────────────────────
+  function atualizarContador() {
+    const len = document.getElementById('proposta').value.length;
+    document.getElementById('char-count').textContent = len.toLocaleString('pt-BR') + ' caracteres';
+  }
+
+  // ─── Submeter proposta ───────────────────────────────────────────
+  async function analisarProposta() {
+    const texto = document.getElementById('proposta').value.trim();
+    if (!texto) {
+      alert('Por favor, cole o texto da proposta antes de analisar.');
+      return;
+    }
+
+    mostrarLoading('Enviando proposta...', 'Aguardando confirmação da fila.');
+
+    try {
+      const resp = await fetch(`${API_BASE_URL}/proposals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: texto })
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      iniciarPolling(data.id);
+
+    } catch (e) {
+      mostrarErro('Erro ao enviar proposta: ' + e.message);
+    }
+  }
+
+  // ─── Polling por resultado ───────────────────────────────────────
+  function iniciarPolling(proposalId) {
+    pollCount = 0;
+    atualizarLoadingMsg('Analisando proposta...', 'Nosso especialista de IA está avaliando cada detalhe.');
+
+    pollTimer = setInterval(async () => {
+      pollCount++;
+
+      if (pollCount > POLL_MAX) {
+        clearInterval(pollTimer);
+        mostrarErro('Tempo limite de análise atingido. Tente novamente.');
+        return;
+      }
+
+      if (pollCount % 8 === 0) {
+        atualizarLoadingMsg(
+          'Análise em andamento...',
+          `Verificando resultado (tentativa ${pollCount}/${POLL_MAX})`
+        );
+      }
+
+      try {
+        const resp = await fetch(`${API_BASE_URL}/proposals/${proposalId}`);
+        if (!resp.ok) return; // ignora erros transitórios
+
+        const data = await resp.json();
+
+        if (data.status === 'done') {
+          clearInterval(pollTimer);
+          exibirResultado(data.result);
+
+        } else if (data.status === 'error') {
+          clearInterval(pollTimer);
+          mostrarErro(
+            'A análise encontrou um erro: ' +
+            (data.result?.erro || 'Erro desconhecido')
+          );
+
+        } else if (data.status === 'processing') {
+          atualizarLoadingMsg(
+            'Claude está processando...',
+            'A análise foi iniciada. Isso leva alguns segundos.'
+          );
+        }
+      } catch (e) {
+        // Ignora falha de rede pontual no polling
+      }
+    }, POLL_INTERVAL);
+  }
+
+  // ─── Exibir resultado ────────────────────────────────────────────
+  function exibirResultado(r) {
+    esconderLoading();
+
+    // Veredito
+    const banner = document.getElementById('veredito-banner');
+    const vClass = { aceitar: 'v-aceitar', negociar: 'v-negociar', recusar: 'v-recusar' };
+    const vLabel = { aceitar: '✅ Aceitar', negociar: '🤝 Negociar', recusar: '❌ Recusar' };
+    const v = (r.veredito || 'negociar').toLowerCase();
+    banner.className = 'veredito-banner ' + (vClass[v] || 'v-negociar');
+    banner.textContent = 'Veredito: ' + (vLabel[v] || r.veredito);
+
+    // Grid de seções
+    const grid = document.getElementById('resultado-grid');
+    grid.innerHTML = '';
+
+    // Resumo (largura total)
+    grid.appendChild(secao('full', '📝 Resumo', `<p>${esc(r.resumo || '—')}</p>`));
+
+    // Pontos Positivos
+    grid.appendChild(secao('positivos', '✅ Pontos Positivos',
+      lista(r.pontos_positivos)));
+
+    // Pontos de Atenção
+    grid.appendChild(secao('atencao', '⚠️ Pontos de Atenção',
+      lista(r.pontos_atencao)));
+
+    // Avaliação de Preço
+    const preco = r.avaliacao_preco || {};
+    const precoValor = typeof preco === 'string' ? preco : (preco.avaliacao || '');
+    const precoJust  = typeof preco === 'object' ? (preco.justificativa || '') : '';
+    const pClass = { caro: 'p-caro', justo: 'p-justo', barato: 'p-barato' };
+    grid.appendChild(secao('', '💰 Avaliação de Preço',
+      `<span class="preco-label ${pClass[precoValor.toLowerCase()] || ''}">${esc(precoValor)}</span>
+       <p>${esc(precoJust)}</p>`
+    ));
+
+    // Riscos
+    grid.appendChild(secao('riscos', '🚨 Riscos',
+      lista(r.riscos)));
+
+    // Como Negociar (largura total)
+    grid.appendChild(secao('negociar full', '💡 Como Negociar',
+      lista(r.como_negociar)));
+
+    // Exibe a seção
+    document.getElementById('resultado').style.display = 'block';
+    document.getElementById('btn-nova').style.display  = 'inline-block';
+    document.getElementById('resultado').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // ─── Helpers de UI ───────────────────────────────────────────────
+  function mostrarLoading(titulo, detalhe) {
+    document.getElementById('card-input').style.display  = 'none';
+    document.getElementById('resultado').style.display   = 'none';
+    document.getElementById('loading').style.display     = 'block';
+    document.getElementById('btn-analisar').disabled     = true;
+    atualizarLoadingMsg(titulo, detalhe);
+  }
+
+  function atualizarLoadingMsg(titulo, detalhe) {
+    document.getElementById('loading-titulo').textContent  = titulo;
+    document.getElementById('loading-detalhe').textContent = detalhe;
+  }
+
+  function esconderLoading() {
+    document.getElementById('loading').style.display = 'none';
+  }
+
+  function mostrarErro(msg) {
+    esconderLoading();
+    document.getElementById('card-input').style.display = 'block';
+    document.getElementById('btn-analisar').disabled    = false;
+
+    // Exibe erro dentro do card de resultado
+    const r = document.getElementById('resultado');
+    r.innerHTML = `<div class="error-box">❌ ${esc(msg)}</div>
+                   <div style="text-align:center;margin-top:1rem">
+                     <button class="btn btn-primary" onclick="novaAnalise()">Tentar novamente</button>
+                   </div>`;
+    r.style.display = 'block';
+    r.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function novaAnalise() {
+    if (pollTimer) clearInterval(pollTimer);
+    document.getElementById('proposta').value          = '';
+    document.getElementById('char-count').textContent  = '0 caracteres';
+    document.getElementById('card-input').style.display = 'block';
+    document.getElementById('loading').style.display    = 'none';
+    document.getElementById('resultado').style.display  = 'none';
+    document.getElementById('btn-analisar').disabled    = false;
+    document.getElementById('resultado').innerHTML      = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function secao(classes, titulo, conteudo) {
+    const div = document.createElement('div');
+    div.className = 'r-section ' + classes;
+    div.innerHTML = `<h3>${titulo}</h3>${conteudo}`;
+    return div;
+  }
+
+  function lista(arr) {
+    if (!Array.isArray(arr) || arr.length === 0) return '<p style="color:var(--muted)">Nenhum item.</p>';
+    return '<ul>' + arr.map(i => `<li>${esc(i)}</li>`).join('') + '</ul>';
+  }
+
+  function esc(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>

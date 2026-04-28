@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs,lambda,apigateway,iam,logs,sts
+      - DEBUG=0
+      # Lambdas Java rodam em containers Docker nesta rede para alcançar o PostgreSQL
+      - LAMBDA_DOCKER_NETWORK=avalia-net
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "localstack-data:/var/lib/localstack"
+    networks:
+      - avalia-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=avaliapropostas
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+    volumes:
+      - "./sql/init.sql:/docker-entrypoint-initdb.d/init.sql"
+      - "postgres-data:/var/lib/postgresql/data"
+    networks:
+      - avalia-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d avaliapropostas"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  avalia-net:
+    name: avalia-net
+    driver: bridge
+
+volumes:
+  localstack-data:
+  postgres-data:
