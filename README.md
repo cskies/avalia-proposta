@@ -7,15 +7,15 @@ e um veredito final (aceitar / negociar / recusar).
 ## Arquitetura
 
 ```
-Frontend (S3/local) ──POST──▶ API Gateway ──▶ Lambda submit-proposal
-                                                    │
-                                                 SQS fila
-                                                    │
-                                              Lambda analyze-proposal
-                                                    │
-                                          Claude API ──▶ PostgreSQL
-                                                    │
-Frontend ──polling GET──▶ API Gateway ──▶ Lambda get-proposal ──▶ PostgreSQL
+Frontend (local) ──POST──▶ API Gateway REST ──▶ Lambda submit-proposal
+                                                       │
+                                                    SQS fila
+                                                       │
+                                                 Lambda analyze-proposal
+                                                       │
+                                             Claude API ──▶ PostgreSQL
+                                                       │
+Frontend ──polling GET──▶ API Gateway REST ──▶ Lambda get-proposal ──▶ PostgreSQL
 ```
 
 ## Estrutura de pastas
@@ -23,13 +23,13 @@ Frontend ──polling GET──▶ API Gateway ──▶ Lambda get-proposal �
 ```
 avalia-proposta/
 ├── infrastructure/
-│   ├── docker-compose.yml   # LocalStack + PostgreSQL
-│   ├── init.sh              # Cria todos os recursos AWS locais
-│   ├── update-lambda.sh     # Recompila e redeploya as Lambdas
-│   ├── Makefile             # Atalhos de desenvolvimento
-│   ├── .env.example         # Variáveis de ambiente necessárias
+│   ├── docker-compose.yml     # LocalStack + PostgreSQL
+│   ├── init.sh                # Cria todos os recursos AWS locais
+│   ├── update-lambda.sh       # Recompila e redeploya as Lambdas
+│   ├── Makefile               # Atalhos de desenvolvimento
+│   ├── .env.example           # Variáveis de ambiente necessárias
 │   └── sql/
-│       └── init.sql         # Schema da tabela proposals
+│       └── init.sql           # Schema da tabela proposals
 ├── backend/
 │   ├── pom.xml
 │   └── src/main/java/com/avaliapropostas/
@@ -43,7 +43,8 @@ avalia-proposta/
 │       └── model/
 │           └── Proposal.java
 └── frontend/
-    └── index.html           # SPA completa sem dependências externas
+    ├── index.html             # Fonte (contém __API_URL_PLACEHOLDER__)
+    └── index-local.html       # Gerado pelo init.sh com a URL real injetada
 ```
 
 ## Pré-requisitos
@@ -52,10 +53,19 @@ avalia-proposta/
 |------------------|---------------|---------------------------------------|
 | Docker           | 24+           | Rodar LocalStack e PostgreSQL          |
 | Docker Compose   | v2            | Orquestrar os containers              |
-| Java JDK         | 17            | Compilar e rodar o backend             |
+| Java JDK         | 17            | Compilar o backend                    |
 | Maven            | 3.9+          | Build do projeto Java                 |
 | AWS CLI          | v2            | Criar recursos no LocalStack          |
 | Claude API key   | —             | Motor de análise (console.anthropic.com) |
+
+### Instalando o AWS CLI (se necessário)
+
+```bash
+curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+cd /tmp && unzip -q awscliv2.zip
+./aws/install --install-dir ~/.local/aws-cli --bin-dir ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"   # adicione ao seu ~/.bashrc ou ~/.zshrc
+```
 
 ## Configuração inicial
 
@@ -73,12 +83,12 @@ cp .env.example .env
 ## Como rodar localmente
 
 ```bash
+export PATH="$HOME/.local/bin:$PATH"   # garante que o AWS CLI está no PATH
 cd infrastructure
-
-# Sobe LocalStack + PostgreSQL, compila Java e inicializa todos os recursos AWS
-export CLAUDE_API_KEY=sk-ant-...
 make init
 ```
+
+O `init.sh` lê automaticamente o `.env` do mesmo diretório — não é necessário exportar a chave manualmente.
 
 Ao final, o script exibe:
 
@@ -87,33 +97,38 @@ Ao final, o script exibe:
 ║            Avalia Proposta — Inicialização OK!               ║
 ╚══════════════════════════════════════════════════════════════╝
 
-  API Gateway URL : http://localhost:4566/abc123def456
-  POST proposta   : http://localhost:4566/abc123def456/proposals
-  GET resultado   : http://localhost:4566/abc123def456/proposals/{id}
+  API Gateway URL : http://localhost:4566/restapis/<API_ID>/local/_user_request_
+  POST proposta   : http://localhost:4566/restapis/<API_ID>/local/_user_request_/proposals
+  GET resultado   : http://localhost:4566/restapis/<API_ID>/local/_user_request_/proposals/{id}
 ```
 
-### Atualizar a URL no frontend
+### Abrir o frontend
 
-Edite `frontend/index.html` e altere a linha:
+O `init.sh` gera automaticamente `frontend/index-local.html` com a URL da API já injetada.
+Abra esse arquivo diretamente no navegador — **não abra `index.html`**, que ainda contém o placeholder.
 
-```javascript
-const API_BASE_URL = 'http://localhost:4566/abc123def456';
+```bash
+# Linux
+xdg-open ../frontend/index-local.html
+
+# macOS
+open ../frontend/index-local.html
 ```
-
-Em seguida abra o arquivo `frontend/index.html` direto no navegador.
 
 ## Como testar via curl
 
 ```bash
+API_URL="http://localhost:4566/restapis/<API_ID>/local/_user_request_"
+
 # Submete uma proposta
-curl -X POST http://localhost:4566/<API_ID>/proposals \
+curl -s -X POST "$API_URL/proposals" \
   -H "Content-Type: application/json" \
   -d '{"text": "Proposta: licença anual de 50 usuários por R$ 60.000/ano com suporte 8x5."}' | jq
 
 # Resposta: {"id": "uuid-gerado", "status": "pending", ...}
 
 # Consulta o resultado (repita até status == "done")
-curl http://localhost:4566/<API_ID>/proposals/<uuid> | jq
+curl -s "$API_URL/proposals/<uuid>" | jq
 ```
 
 ## Ciclo de desenvolvimento
@@ -180,7 +195,7 @@ aws configure
 # Anote o endpoint, por exemplo: mydb.abc123.us-east-1.rds.amazonaws.com
 ```
 
-### 2. Crie os recursos manualmente ou via CloudFormation
+### 2. Crie os recursos
 
 ```bash
 # Crie a fila SQS
@@ -209,16 +224,21 @@ aws lambda create-function \
 # Repita para analyze-proposal (adicione CLAUDE_API_KEY) e get-proposal
 ```
 
-### 3. Configure o API Gateway HTTP no console AWS
+### 3. Configure o API Gateway no console AWS
+
+Na AWS real você pode usar **HTTP API (v2)** que é mais simples e barato:
 
 - Crie uma HTTP API
 - Adicione rotas: `POST /proposals` → Lambda submit e `GET /proposals/{id}` → Lambda get
 - Habilite CORS
 
+> **Nota:** localmente usamos REST API (v1) por compatibilidade com o LocalStack Community Edition.
+> Na AWS real, HTTP API (v2) é recomendado.
+
 ### 4. Deploy do frontend
 
 ```bash
-# Atualize API_BASE_URL no index.html com a URL do API Gateway
+# Atualize API_BASE_URL em index.html com a URL do API Gateway
 aws s3 cp frontend/index.html s3://avalia-proposta-frontend/ \
   --content-type text/html
 
@@ -232,29 +252,36 @@ para `CLAUDE_API_KEY`, `DB_USER` e `DB_PASS`.
 
 ## Variáveis de ambiente das Lambdas
 
-| Variável          | Obrigatória | Descrição                                            |
-|-------------------|-------------|------------------------------------------------------|
-| `CLAUDE_API_KEY`  | ✅ (analyze) | Chave da API Claude (Anthropic)                     |
-| `DB_URL`          | ✅           | JDBC URL do PostgreSQL                               |
-| `DB_USER`         | ✅           | Usuário do banco                                     |
-| `DB_PASS`         | ✅           | Senha do banco                                       |
-| `SQS_QUEUE_URL`   | ✅ (submit)  | URL completa da fila SQS                             |
-| `SQS_ENDPOINT`    | LocalStack  | Override do endpoint SQS (ex: `http://localstack:4566`) |
-| `AWS_DEFAULT_REGION` | —        | Região AWS (padrão: `us-east-1`)                    |
+| Variável             | Obrigatória   | Descrição                                               |
+|----------------------|---------------|---------------------------------------------------------|
+| `CLAUDE_API_KEY`     | ✅ (analyze)  | Chave da API Claude (Anthropic)                         |
+| `DB_URL`             | ✅            | JDBC URL do PostgreSQL                                  |
+| `DB_USER`            | ✅            | Usuário do banco                                        |
+| `DB_PASS`            | ✅            | Senha do banco                                          |
+| `SQS_QUEUE_URL`      | ✅ (submit)   | URL completa da fila SQS                                |
+| `SQS_ENDPOINT`       | LocalStack    | Override do endpoint SQS (ex: `http://localstack:4566`) |
+| `AWS_DEFAULT_REGION` | —             | Região AWS (padrão: `us-east-1`)                        |
 
 ## Troubleshooting
+
+**Frontend mostra "API não configurada"**
+- Você está abrindo `index.html` (que tem o placeholder). Abra `frontend/index-local.html`
+
+**`aws: command not found` ao rodar `make init`**
+- Instale o AWS CLI (veja seção Pré-requisitos) e garanta que está no PATH:
+  `export PATH="$HOME/.local/bin:$PATH"`
 
 **Lambda não conecta ao PostgreSQL no LocalStack**
 - Verifique se `LAMBDA_DOCKER_NETWORK=avalia-net` está definido no docker-compose
 - O container Lambda precisa estar na mesma rede do container `postgres`
 
 **`CLAUDE_API_KEY` indefinida**
-- Exporte antes de rodar: `export CLAUDE_API_KEY=sk-ant-...`
-- Ou edite o `init.sh` passando o valor diretamente
+- Defina no arquivo `infrastructure/.env`: `CLAUDE_API_KEY=sk-ant-...`
+- O `init.sh` carrega o `.env` automaticamente
 
 **API Gateway retorna 404**
-- O API ID muda a cada `init.sh`. Copie a URL exibida no final do script
-- Verifique: `make status` e `make list-lambdas`
+- O API ID muda se você recriar a infra. Copie a URL exibida no final do `init.sh`
+- Verifique com: `make status` e `make list-lambdas`
 
-**Analisando lento no primeiro request**
-- Java Lambda tem cold start de 3-8s. Invocações subsequentes são rápidas
+**Análise lenta no primeiro request**
+- Java Lambda tem cold start de 3–8s. Invocações subsequentes são rápidas
