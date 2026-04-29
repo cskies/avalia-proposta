@@ -13,6 +13,14 @@ ACCOUNT_ID="000000000000"
 QUEUE_NAME="proposals-queue"
 JAR_PATH="../backend/target/avalia-proposta.jar"
 
+# Carrega variáveis do .env se existir
+if [ -f "$(dirname "$0")/.env" ]; then
+    set -o allexport
+    # shellcheck source=/dev/null
+    source "$(dirname "$0")/.env"
+    set +o allexport
+fi
+
 # Credenciais dummy para LocalStack (qualquer valor funciona)
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
@@ -114,11 +122,13 @@ create_or_update_lambda() {
         aws_local lambda update-function-code \
             --function-name "$name" \
             --zip-file "fileb://$JAR_PATH" --output text --query 'FunctionName' > /dev/null
+        aws_local lambda wait function-updated --function-name "$name" 2>/dev/null || true
         aws_local lambda update-function-configuration \
             --function-name "$name" \
             --environment "Variables={${env_vars}}" \
             --timeout "$timeout" \
             --output text --query 'FunctionName' > /dev/null
+        aws_local lambda wait function-updated --function-name "$name" 2>/dev/null || true
     else
         info "Criando Lambda: $name..."
         aws_local lambda create-function \
@@ -174,59 +184,88 @@ else
     warn "Event source mapping já existe."
 fi
 
-# ──────────────────────── 10. API Gateway HTTP (v2) ──────────────────────────
-info "Criando API Gateway HTTP..."
+# ──────────────────────── 10. API Gateway REST (v1) ──────────────────────────
+info "Criando API Gateway REST..."
 
-# Verifica se já existe uma API com o mesmo nome
-EXISTING_API=$(aws_local apigatewayv2 get-apis \
-    --query "Items[?Name=='avalia-proposta-api'].ApiId" --output text 2>/dev/null || echo "")
+# Verifica se já existe
+EXISTING_API=$(aws_local apigateway get-rest-apis \
+    --query "items[?name=='avalia-proposta-api'].id" --output text 2>/dev/null || echo "")
 
 if [ -n "$EXISTING_API" ] && [ "$EXISTING_API" != "None" ]; then
     API_ID="$EXISTING_API"
     warn "API Gateway já existe: $API_ID"
 else
-    API_ID=$(aws_local apigatewayv2 create-api \
+    API_ID=$(aws_local apigateway create-rest-api \
         --name "avalia-proposta-api" \
-        --protocol-type HTTP \
-        --cors-configuration '{"AllowOrigins":["*"],"AllowMethods":["GET","POST","OPTIONS"],"AllowHeaders":["Content-Type","Authorization"],"MaxAge":3600}' \
-        --query 'ApiId' --output text)
+        --query 'id' --output text)
     info "API Gateway criada: $API_ID"
+
+    # Recurso raiz
+    ROOT_ID=$(aws_local apigateway get-resources \
+        --rest-api-id "$API_ID" \
+        --query 'items[?path==`/`].id' --output text)
+
+    # /proposals
+    PROPOSALS_RES=$(aws_local apigateway create-resource \
+        --rest-api-id "$API_ID" \
+        --parent-id "$ROOT_ID" \
+        --path-part "proposals" \
+        --query 'id' --output text)
+
+    # /proposals/{id}
+    PROPOSAL_ID_RES=$(aws_local apigateway create-resource \
+        --rest-api-id "$API_ID" \
+        --parent-id "$PROPOSALS_RES" \
+        --path-part "{id}" \
+        --query 'id' --output text)
+
+    # POST /proposals → submit-proposal
+    aws_local apigateway put-method \
+        --rest-api-id "$API_ID" --resource-id "$PROPOSALS_RES" \
+        --http-method POST --authorization-type NONE > /dev/null
+
+    aws_local apigateway put-integration \
+        --rest-api-id "$API_ID" --resource-id "$PROPOSALS_RES" \
+        --http-method POST --type AWS_PROXY --integration-http-method POST \
+        --uri "arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:submit-proposal/invocations" > /dev/null
+
+    # OPTIONS /proposals (CORS preflight)
+    aws_local apigateway put-method \
+        --rest-api-id "$API_ID" --resource-id "$PROPOSALS_RES" \
+        --http-method OPTIONS --authorization-type NONE > /dev/null
+
+    aws_local apigateway put-integration \
+        --rest-api-id "$API_ID" --resource-id "$PROPOSALS_RES" \
+        --http-method OPTIONS --type MOCK \
+        --request-templates '{"application/json":"{\"statusCode\":200}"}' > /dev/null
+
+    aws_local apigateway put-method-response \
+        --rest-api-id "$API_ID" --resource-id "$PROPOSALS_RES" \
+        --http-method OPTIONS --status-code 200 \
+        --response-parameters '{"method.response.header.Access-Control-Allow-Origin":false,"method.response.header.Access-Control-Allow-Methods":false,"method.response.header.Access-Control-Allow-Headers":false}' > /dev/null
+
+    aws_local apigateway put-integration-response \
+        --rest-api-id "$API_ID" --resource-id "$PROPOSALS_RES" \
+        --http-method OPTIONS --status-code 200 \
+        --response-parameters '{"method.response.header.Access-Control-Allow-Origin":"'"'"'*'"'"'","method.response.header.Access-Control-Allow-Methods":"'"'"'GET,POST,OPTIONS'"'"'","method.response.header.Access-Control-Allow-Headers":"'"'"'Content-Type,Authorization'"'"'"}' > /dev/null
+
+    # GET /proposals/{id} → get-proposal
+    aws_local apigateway put-method \
+        --rest-api-id "$API_ID" --resource-id "$PROPOSAL_ID_RES" \
+        --http-method GET --authorization-type NONE > /dev/null
+
+    aws_local apigateway put-integration \
+        --rest-api-id "$API_ID" --resource-id "$PROPOSAL_ID_RES" \
+        --http-method GET --type AWS_PROXY --integration-http-method POST \
+        --uri "arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:get-proposal/invocations" > /dev/null
+
+    # Deploy → stage "local"
+    aws_local apigateway create-deployment \
+        --rest-api-id "$API_ID" \
+        --stage-name "local" > /dev/null
+
+    info "API Gateway deployada (stage: local)"
 fi
-
-# Integrações Lambda
-SUBMIT_INT=$(aws_local apigatewayv2 create-integration \
-    --api-id "$API_ID" \
-    --integration-type AWS_PROXY \
-    --integration-uri "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:submit-proposal" \
-    --payload-format-version "2.0" \
-    --query 'IntegrationId' --output text)
-
-GET_INT=$(aws_local apigatewayv2 create-integration \
-    --api-id "$API_ID" \
-    --integration-type AWS_PROXY \
-    --integration-uri "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:get-proposal" \
-    --payload-format-version "2.0" \
-    --query 'IntegrationId' --output text)
-
-# Rotas
-aws_local apigatewayv2 create-route \
-    --api-id "$API_ID" \
-    --route-key "POST /proposals" \
-    --target "integrations/$SUBMIT_INT" \
-    --output text --query 'RouteId' > /dev/null
-
-aws_local apigatewayv2 create-route \
-    --api-id "$API_ID" \
-    --route-key "GET /proposals/{id}" \
-    --target "integrations/$GET_INT" \
-    --output text --query 'RouteId' > /dev/null
-
-# Stage padrão com auto-deploy
-aws_local apigatewayv2 create-stage \
-    --api-id "$API_ID" \
-    --stage-name '$default' \
-    --auto-deploy \
-    --output text --query 'StageName' > /dev/null
 
 # Permissão para API Gateway invocar as Lambdas
 aws_local lambda add-permission \
@@ -234,7 +273,7 @@ aws_local lambda add-permission \
     --statement-id apigw-submit \
     --action lambda:InvokeFunction \
     --principal apigateway.amazonaws.com \
-    --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*/*/proposals" \
+    --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*/POST/proposals" \
     --output text --query 'Statement' > /dev/null 2>&1 || true
 
 aws_local lambda add-permission \
@@ -246,16 +285,22 @@ aws_local lambda add-permission \
     --output text --query 'Statement' > /dev/null 2>&1 || true
 
 # ──────────────────────── 11. Deploy do frontend no S3 ───────────────────────
-API_URL="http://localhost:4566/${API_ID}"
+API_URL="http://localhost:4566/restapis/${API_ID}/local/_user_request_"
 
 info "Atualizando API_URL no frontend..."
 sed "s|__API_URL_PLACEHOLDER__|${API_URL}|g" ../frontend/index.html \
     > /tmp/index-local.html
 
-aws_local s3 cp /tmp/index-local.html s3://avalia-proposta-frontend/index.html \
-    --content-type "text/html" > /dev/null
+# Salva também como arquivo local para abrir direto no navegador
+cp /tmp/index-local.html ../frontend/index-local.html
+info "Frontend salvo em: frontend/index-local.html"
 
-info "Frontend publicado no S3."
+# Upload S3 (opcional, pode falhar no LocalStack Community)
+aws_local s3api put-object \
+    --bucket avalia-proposta-frontend \
+    --key index.html \
+    --body /tmp/index-local.html \
+    --content-type "text/html" > /dev/null 2>&1 && info "Frontend publicado no S3." || warn "Upload S3 ignorado (use frontend/index-local.html)."
 
 # ──────────────────────── 12. Resumo final ───────────────────────────────────
 echo ""

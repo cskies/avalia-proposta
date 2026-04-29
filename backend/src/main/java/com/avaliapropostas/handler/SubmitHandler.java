@@ -2,8 +2,8 @@ package com.avaliapropostas.handler;
 
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
-import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
-import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.avaliapropostas.service.ProposalService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,7 +22,7 @@ import java.util.Map;
  * Recebe POST /proposals do API Gateway, persiste a proposta e publica na fila SQS.
  * Retorna 202 com o UUID gerado para que o frontend faça polling.
  */
-public class SubmitHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse> {
+public class SubmitHandler implements RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent> {
 
     private final ProposalService proposalService;
     private final SqsClient sqsClient;
@@ -55,7 +55,7 @@ public class SubmitHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIG
     }
 
     @Override
-    public APIGatewayV2HTTPResponse handleRequest(APIGatewayV2HTTPEvent event, Context ctx) {
+    public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context ctx) {
         ctx.getLogger().log("SubmitHandler acionado");
 
         try {
@@ -98,28 +98,25 @@ public class SubmitHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIG
 
     // ─── helpers ────────────────────────────────────────────────────────────────
 
-    private APIGatewayV2HTTPResponse okResponse(int status, String body) {
-        return APIGatewayV2HTTPResponse.builder()
+    private APIGatewayProxyResponseEvent okResponse(int status, String body) {
+        return new APIGatewayProxyResponseEvent()
                 .withStatusCode(status)
                 .withBody(body)
-                .withHeaders(corsHeaders())
-                .build();
+                .withHeaders(corsHeaders());
     }
 
-    private APIGatewayV2HTTPResponse errorResponse(int status, String msg) {
+    private APIGatewayProxyResponseEvent errorResponse(int status, String msg) {
         try {
             String body = mapper.writeValueAsString(Map.of("error", msg));
-            return APIGatewayV2HTTPResponse.builder()
+            return new APIGatewayProxyResponseEvent()
                     .withStatusCode(status)
                     .withBody(body)
-                    .withHeaders(corsHeaders())
-                    .build();
+                    .withHeaders(corsHeaders());
         } catch (Exception e) {
-            return APIGatewayV2HTTPResponse.builder()
+            return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
                     .withBody("{\"error\":\"Erro desconhecido\"}")
-                    .withHeaders(corsHeaders())
-                    .build();
+                    .withHeaders(corsHeaders());
         }
     }
 
